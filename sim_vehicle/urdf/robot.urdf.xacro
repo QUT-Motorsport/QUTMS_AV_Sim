@@ -30,24 +30,13 @@
     <xacro:include filename="$(find sim_vehicle)/urdf/wheels.urdf.xacro"/>
 
     <!-- Import all available sensors -->
-    <!-- GPS -->
-    <xacro:include filename="$(find sim_vehicle)/urdf/SBG_GPS.urdf.xacro"/>
-    <!-- IMU -->
-    <xacro:include filename="$(find sim_vehicle)/urdf/SBG_IMU.urdf.xacro"/>
-    <!-- Velodyne VLP-32C -->
-    <xacro:include filename="$(find sim_vehicle)/urdf/VLP-32C.urdf.xacro"/>
-    <!-- ZED Stereo camera -->
-    <xacro:include filename="$(find sim_vehicle)/urdf/ZED2i.urdf.xacro"/>
+    <xacro:include filename="$(find sim_vehicle)/urdf/lidar.urdf.xacro"/>
+    <xacro:include filename="$(find sim_vehicle)/urdf/camera.urdf.xacro"/>
 
     <!--  Include the plugins  -->
-    <!-- SBG plugin included in the SBG_IMU urdf -->
     <gazebo>
         <!-- also is ros node name -->
-        <plugin name="race_car" filename="libgazebo_ros_race_car.so"></plugin>
-    </gazebo>
-
-    <gazebo>
-        <plugin name="cone_detection" filename="libgazebo_ros_cone_detection.so"></plugin>
+        <plugin name="vehicle" filename="libgazebo_vehicle.so"></plugin>
     </gazebo>
 
     <!-- *************** -->

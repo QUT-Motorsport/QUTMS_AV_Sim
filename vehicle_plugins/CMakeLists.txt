@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.5)
-project(eufs_plugins)
+project(vehicle_plugins)
 
 # Default to C++14
 if(NOT CMAKE_CXX_STANDARD)
@@ -26,10 +26,7 @@ find_package(tf2_geometry_msgs REQUIRED)
 find_package(eufs_models REQUIRED)
 find_package(ackermann_msgs REQUIRED)
 find_package(ament_index_cpp REQUIRED)
-find_package(image_geometry REQUIRED)
 find_package(yaml_cpp_vendor REQUIRED)
-find_package(driverless_msgs REQUIRED)
-find_package(sbg_driver REQUIRED)
 
 link_directories(${gazebo_dev_LIBRARY_DIRS})
 
@@ -45,9 +42,7 @@ if(ENABLE_PROFILER)
   endif()
 endif()
 
-add_subdirectory(gazebo_cone_detection_plugin)
-add_subdirectory(gazebo_race_car_plugin)
-add_subdirectory(gazebo_sbg_plugin)
+add_subdirectory(gazebo_vehicle_plugin)
 add_subdirectory(gazebo_lidar_plugin)
 
 ament_export_libraries(gazebo_ros_template2)
@@ -69,7 +64,5 @@ ament_export_dependencies(eufs_models)
 ament_export_dependencies(ackermann_msgs)
 ament_export_dependencies(ament_index_cpp)
 ament_export_dependencies(yaml_cpp_vendor)
-ament_export_dependencies(driverless_msgs)
-ament_export_dependencies(sbg_driver)
 
 ament_package()

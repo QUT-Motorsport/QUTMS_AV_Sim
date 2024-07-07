@@ -1,72 +1,73 @@
-#include "gazebo_race_car_plugin/gazebo_ros_race_car.hpp"
+#include "gazebo_vehicle_plugin/gazebo_vehicle.hpp"
 
 namespace gazebo_plugins {
-namespace eufs_plugins {
+namespace vehicle_plugins {
 
-RaceCarPlugin::RaceCarPlugin() {}
+VehiclePlugin::VehiclePlugin() {}
 
-RaceCarPlugin::~RaceCarPlugin() { _update_connection.reset(); }
+VehiclePlugin::~VehiclePlugin() { _update_connection.reset(); }
 
-void RaceCarPlugin::Load(gazebo::physics::ModelPtr model, sdf::ElementPtr sdf) {
-    _rosnode = gazebo_ros::Node::Get(sdf);
+void VehiclePlugin::Load(gazebo::physics::ModelPtr model, sdf::ElementPtr sdf) {
+    rosnode_ = gazebo_ros::Node::Get(sdf);
 
-    RCLCPP_DEBUG(_rosnode->get_logger(), "Loading RaceCarPlugin");
+    RCLCPP_DEBUG(rosnode_->get_logger(), "Loading VehiclePlugin");
 
     _model = model;
     _world = _model->GetWorld();
 
-    _tf_br = std::make_unique<tf2_ros::TransformBroadcaster>(_rosnode);
+    _tf_br = std::make_unique<tf2_ros::TransformBroadcaster>(rosnode_);
 
     // Initialize parameters
     initParams();
 
     // ROS Publishers
-    // SBG odometry
-    _pub_odom = _rosnode->create_publisher<nav_msgs::msg::Odometry>("/odometry", 1);
+    // Odometry
+    _pub_odom = rosnode_->create_publisher<nav_msgs::msg::Odometry>("/odometry", 1);
+    _pub_gt_odom = rosnode_->create_publisher<nav_msgs::msg::Odometry>("/odometry/ground_truth", 1);
 
     // RVIZ joint visuals
-    _pub_joint_state = _rosnode->create_publisher<sensor_msgs::msg::JointState>("/joint_states/steering", 1);
+    pub_joint_state_ = rosnode_->create_publisher<sensor_msgs::msg::JointState>("/joint_states/steering", 1);
 
     // ROS Subscriptions
-    _sub_cmd = _rosnode->create_subscription<ackermann_msgs::msg::AckermannDriveStamped>(
-        "/control/driving_command", 1, std::bind(&RaceCarPlugin::onCmd, this, std::placeholders::_1));
+    _sub_cmd = rosnode_->create_subscription<ackermann_msgs::msg::AckermannDriveStamped>(
+        "/control/driving_command", 1, std::bind(&VehiclePlugin::onCmd, this, std::placeholders::_1));
 
     // ROS Services
-    _reset_vehicle_pos_srv = _rosnode->create_service<std_srvs::srv::Trigger>(
+    _reset_vehicle_pos_srv = rosnode_->create_service<std_srvs::srv::Trigger>(
         "/system/reset_car_pos",
-        std::bind(&RaceCarPlugin::resetVehiclePosition, this, std::placeholders::_1, std::placeholders::_2));
+        std::bind(&VehiclePlugin::resetVehiclePosition, this, std::placeholders::_1, std::placeholders::_2));
 
     // Connect to Gazebo
-    _update_connection = gazebo::event::Events::ConnectWorldUpdateBegin(std::bind(&RaceCarPlugin::update, this));
+    _update_connection = gazebo::event::Events::ConnectWorldUpdateBegin(std::bind(&VehiclePlugin::update, this));
     _last_sim_time = _world->SimTime();
 
-    _max_steering_rate = (_vehicle->getParam().input_ranges.delta.max - _vehicle->getParam().input_ranges.delta.min) /
+    _max_steering_rate = (vehicle_model_->getParam().input_ranges.delta.max - vehicle_model_->getParam().input_ranges.delta.min) /
                          _steering_lock_time;
 
     // Set offset
     setPositionFromWorld();
 
-    RCLCPP_INFO(_rosnode->get_logger(), "RaceCarPlugin Loaded");
+    RCLCPP_INFO(rosnode_->get_logger(), "Gazebo VehiclePlugin Loaded");
 }
 
-void RaceCarPlugin::initParams() {
+void VehiclePlugin::initParams() {
     // Get ROS parameters
-    _update_rate = _rosnode->declare_parameter("update_rate", 2.0);
-    _publish_rate = _rosnode->declare_parameter("publish_rate", 200.0);
-    _map_frame = _rosnode->declare_parameter("map_frame", "map");
-    _odom_frame = _rosnode->declare_parameter("odom_frame", "odom");
-    _base_frame = _rosnode->declare_parameter("base_frame", "base_link");
-    _control_delay = _rosnode->declare_parameter("control_delay", 0.5);
+    _update_rate = rosnode_->declare_parameter("update_rate", 2.0);
+    _publish_rate = rosnode_->declare_parameter("publish_rate", 50.0);
+    _map_frame = rosnode_->declare_parameter("map_frame", "map");
+    _odom_frame = rosnode_->declare_parameter("odom_frame", "odom");
+    _base_frame = rosnode_->declare_parameter("base_frame", "base_link");
+    _control_delay = rosnode_->declare_parameter("control_delay", 0.5);
     /// SHOULD BE IN VEHICLE PARAMS FILE
-    _steering_lock_time = _rosnode->declare_parameter("steering_lock_time", 1.0);
+    _steering_lock_time = rosnode_->declare_parameter("steering_lock_time", 1.0);
 
     // Vehicle model
-    std::string vehicle_yaml_name = _rosnode->declare_parameter("vehicle_config", "null");
+    std::string vehicle_yaml_name = rosnode_->declare_parameter("vehicle_params", "null");
     if (vehicle_yaml_name == "null") {
-        RCLCPP_FATAL(_rosnode->get_logger(), "gazebo_ros_race_car plugin missing <yamlConfig>, cannot proceed");
-        return;
+        RCLCPP_FATAL(rosnode_->get_logger(), "gazebo_vehicle plugin missing <vehicle_config> in <config.yaml>, cannot proceed");
+        exit(1);
     }
-    vehicle_model_ = std::unique_ptr<eufs::models::VehicleModel>(new eufs::models::PointMass(vehicle_yaml_name));
+    vehicle_model_ = std::unique_ptr<eufs::models::VehicleModel>(new eufs::models::DynamicBicycle(vehicle_yaml_name));
 
 
     // Steering joints
@@ -76,46 +77,46 @@ void RaceCarPlugin::initParams() {
     _right_steering_joint = _model->GetJoint(rightSteeringJointName);
 }
 
-void RaceCarPlugin::setPositionFromWorld() {
+void VehiclePlugin::setPositionFromWorld() {
     _offset = _model->WorldPose();
 
-    RCLCPP_DEBUG(_rosnode->get_logger(), "Got starting offset %f %f %f", _offset.Pos()[0], _offset.Pos()[1],
+    RCLCPP_DEBUG(rosnode_->get_logger(), "Got starting offset %f %f %f", _offset.Pos()[0], _offset.Pos()[1],
                  _offset.Pos()[2]);
 
-    _state.x = 0.0;
-    _state.y = 0.0;
-    _state.z = 0.0;
-    _state.yaw = 0.0;
-    _state.v_x = 0.0;
-    _state.v_y = 0.0;
-    _state.v_z = 0.0;
-    _state.r_x = 0.0;
-    _state.r_y = 0.0;
-    _state.r_z = 0.0;
-    _state.a_x = 0.0;
-    _state.a_y = 0.0;
-    _state.a_z = 0.0;
+    state_.x = 0.0;
+    state_.y = 0.0;
+    state_.z = 0.0;
+    state_.yaw = 0.0;
+    state_.v_x = 0.0;
+    state_.v_y = 0.0;
+    state_.v_z = 0.0;
+    state_.r_x = 0.0;
+    state_.r_y = 0.0;
+    state_.r_z = 0.0;
+    state_.a_x = 0.0;
+    state_.a_y = 0.0;
+    state_.a_z = 0.0;
 
     _last_cmd.drive.steering_angle = 0;
     _last_cmd.drive.acceleration = -100;
     _last_cmd.drive.speed = 0;
 }
 
-bool RaceCarPlugin::resetVehiclePosition(std::shared_ptr<std_srvs::srv::Trigger::Request>,
+bool VehiclePlugin::resetVehiclePosition(std::shared_ptr<std_srvs::srv::Trigger::Request>,
                                          std::shared_ptr<std_srvs::srv::Trigger::Response> response) {
-    _state.x = 0.0;
-    _state.y = 0.0;
-    _state.z = 0.0;
-    _state.yaw = 0.0;
-    _state.v_x = 0.0;
-    _state.v_y = 0.0;
-    _state.v_z = 0.0;
-    _state.r_x = 0.0;
-    _state.r_y = 0.0;
-    _state.r_z = 0.0;
-    _state.a_x = 0.0;
-    _state.a_y = 0.0;
-    _state.a_z = 0.0;
+    state_.x = 0.0;
+    state_.y = 0.0;
+    state_.z = 0.0;
+    state_.yaw = 0.0;
+    state_.v_x = 0.0;
+    state_.v_y = 0.0;
+    state_.v_z = 0.0;
+    state_.r_x = 0.0;
+    state_.r_y = 0.0;
+    state_.r_z = 0.0;
+    state_.a_x = 0.0;
+    state_.a_y = 0.0;
+    state_.a_z = 0.0;
 
     const ignition::math::Vector3d vel(0.0, 0.0, 0.0);
     const ignition::math::Vector3d angular(0.0, 0.0, 0.0);
@@ -127,26 +128,26 @@ bool RaceCarPlugin::resetVehiclePosition(std::shared_ptr<std_srvs::srv::Trigger:
     return response->success;
 }
 
-void RaceCarPlugin::setModelState() {
-    double yaw = _state.yaw + _offset.Rot().Yaw();
+void VehiclePlugin::setModelState() {
+    double yaw = state_.yaw + _offset.Rot().Yaw();
 
-    double x = _offset.Pos().X() + _state.x * cos(_offset.Rot().Yaw()) - _state.y * sin(_offset.Rot().Yaw());
-    double y = _offset.Pos().Y() + _state.x * sin(_offset.Rot().Yaw()) + _state.y * cos(_offset.Rot().Yaw());
-    double z = _state.z;
+    double x = _offset.Pos().X() + state_.x * cos(_offset.Rot().Yaw()) - state_.y * sin(_offset.Rot().Yaw());
+    double y = _offset.Pos().Y() + state_.x * sin(_offset.Rot().Yaw()) + state_.y * cos(_offset.Rot().Yaw());
+    double z = state_.z;
 
-    double vx = _state.v_x * cos(yaw) - _state.v_y * sin(yaw);
-    double vy = _state.v_x * sin(yaw) + _state.v_y * cos(yaw);
+    double vx = state_.v_x * cos(yaw) - state_.v_y * sin(yaw);
+    double vy = state_.v_x * sin(yaw) + state_.v_y * cos(yaw);
 
     const ignition::math::Pose3d pose(x, y, z, 0, 0.0, yaw);
     const ignition::math::Vector3d vel(vx, vy, 0.0);
-    const ignition::math::Vector3d angular(0.0, 0.0, _state.r_z);
+    const ignition::math::Vector3d angular(0.0, 0.0, state_.r_z);
 
     _model->SetWorldPose(pose);
     _model->SetAngularVel(angular);
     _model->SetLinearVel(vel);
 }
 
-nav_msgs::msg::Odometry RaceCarPlugin::stateToOdom(const eufs::models::State &state) {
+nav_msgs::msg::Odometry VehiclePlugin::stateToOdom(const eufs::models::State &state) {
     // convert all state field into respective odometry fields
     nav_msgs::msg::Odometry msg;
     msg.header.stamp.sec = _last_sim_time.sec;
@@ -173,29 +174,25 @@ nav_msgs::msg::Odometry RaceCarPlugin::stateToOdom(const eufs::models::State &st
     return msg;
 }
 
-void RaceCarPlugin::publishVehicleMotion() {
+void VehiclePlugin::publishVehicleMotion() {
     // Get odometry msg from state
-    nav_msgs::msg::Odometry odom = stateToOdom(_state);
+    nav_msgs::msg::Odometry odom = stateToOdom(state_);
     if (has_subscribers(_pub_gt_odom)) {
         _pub_gt_odom->publish(odom);
     }
 
-    // Publish pose
-    nav_msgs::msg::Odometry odom_noisy = stateToOdom(_noise->applyNoise(_state));
+    // Apply noise to state and publish
+    nav_msgs::msg::Odometry odom_noisy = stateToOdom(_noise->applyNoise(state_));
     if (has_subscribers(_pub_odom)) {
-        // Publish at 50Hz
-        if (_last_sim_time - _time_last_sbg_odom_published > (1 / 50)) {
-            _pub_odom->publish(odom_noisy);
-            _time_last_sbg_odom_published = _last_sim_time;
-        }
+        _pub_odom->publish(odom_noisy);
     }
 }
 
-void RaceCarPlugin::publishTf() {
+void VehiclePlugin::publishTf() {
     // Base->Odom
     // Position
     tf2::Transform base_to_odom;
-    eufs::models::State noise_tf_state = _noise->applyNoise(_state);
+    eufs::models::State noise_tf_state = _noise->applyNoise(state_);
     base_to_odom.setOrigin(tf2::Vector3(noise_tf_state.x, noise_tf_state.y, 0.0));
 
     // Orientation
@@ -234,7 +231,7 @@ void RaceCarPlugin::publishTf() {
     _tf_br->sendTransform(transform_stamped);
 }
 
-void RaceCarPlugin::update() {
+void VehiclePlugin::update() {
     // Check against update rate
     gazebo::common::Time curTime = _world->SimTime();
     double dt = calc_dt(_last_sim_time, curTime);
@@ -244,25 +241,24 @@ void RaceCarPlugin::update() {
 
     _last_sim_time = curTime;
 
-    _des_input.acc = _last_cmd.drive.acceleration;
-    _des_input.vel = _last_cmd.drive.speed;
-    _des_input.delta = _last_cmd.drive.steering_angle * 3.1415 / 180;
+    des_input_.acc = _last_cmd.drive.acceleration;
+    des_input_.vel = _last_cmd.drive.speed;
+    des_input_.delta = _last_cmd.drive.steering_angle * 3.1415 / 180;
     // 90* (max steering angle) = 16* (max wheel angle)
-    _des_input.delta *= (16.0 / 90.0);  // maybe use params not hardcoded?
+    des_input_.delta *= (16.0 / 90.0);  // maybe use params not hardcoded?
 
-    double current_speed = std::sqrt(std::pow(_state.v_x, 2) + std::pow(_state.v_y, 2));
-    _act_input.acc = (_des_input.vel - current_speed) / dt;
+    double current_speed = std::sqrt(std::pow(state_.v_x, 2) + std::pow(state_.v_y, 2));
+    act_input_.acc = (des_input_.vel - current_speed) / dt;
 
     // Make sure steering rate is within limits
-    _act_input.delta += (_des_input.delta - _act_input.delta >= 0 ? 1 : -1) *
-                        std::min(_max_steering_rate * dt, std::abs(_des_input.delta - _act_input.delta));
+    act_input_.delta += (des_input_.delta - act_input_.delta >= 0 ? 1 : -1) *
+                        std::min(_max_steering_rate * dt, std::abs(des_input_.delta - act_input_.delta));
 
     // Ensure vehicle can drive
-    if (_as_state.state != driverless_msgs::msg::State::DRIVING ||
-        (_world->SimTime() - _last_cmd_time).Double() > 0.5) {
-        _act_input.acc = -100.0;
-        _act_input.vel = 0.0;
-        _act_input.delta = 0.0;
+    if ((_world->SimTime() - _last_cmd_time).Double() > 0.5) {
+        act_input_.acc = -100.0;
+        act_input_.vel = 0.0;
+        act_input_.delta = 0.0;
     }
 
     // Update z value from simulation
@@ -270,12 +266,12 @@ void RaceCarPlugin::update() {
     // the vehicle in simulation has problems interacting with the ground plane.
     // This may cause problems if the vehicle models start to take into account z
     // but because this simulation isn't for flying cars we should be ok (at least for now).
-    _state.z = _model->WorldPose().Pos().Z();
+    state_.z = _model->WorldPose().Pos().Z();
 
-    _vehicle->updateState(_state, _act_input, dt);
+    vehicle_model_->updateState(state_, act_input_, dt);
 
-    _left_steering_joint->SetPosition(0, _act_input.delta);
-    _right_steering_joint->SetPosition(0, _act_input.delta);
+    _left_steering_joint->SetPosition(0, act_input_.delta);
+    _right_steering_joint->SetPosition(0, act_input_.delta);
     // joint states
     sensor_msgs::msg::JointState joint_state;
     joint_state.header.stamp.sec = _last_sim_time.sec;
@@ -285,7 +281,7 @@ void RaceCarPlugin::update() {
     joint_state.position.push_back(_left_steering_joint->Position());
     joint_state.position.push_back(_right_steering_joint->Position());
 
-    _pub_joint_state->publish(joint_state);
+    pub_joint_state_->publish(joint_state);
 
     setModelState();
 
@@ -300,12 +296,10 @@ void RaceCarPlugin::update() {
     publishTf();
 }
 
-void RaceCarPlugin::updateState(const driverless_msgs::msg::State::SharedPtr msg) { _as_state = *msg; }
-
-void RaceCarPlugin::onCmd(const ackermann_msgs::msg::AckermannDriveStamped::SharedPtr msg) {
-    RCLCPP_DEBUG(_rosnode->get_logger(), "Last time: %f", (_world->SimTime() - _last_cmd_time).Double());
+void VehiclePlugin::onCmd(const ackermann_msgs::msg::AckermannDriveStamped::SharedPtr msg) {
+    RCLCPP_DEBUG(rosnode_->get_logger(), "Last time: %f", (_world->SimTime() - _last_cmd_time).Double());
     while ((_world->SimTime() - _last_cmd_time).Double() < _control_delay) {
-        RCLCPP_DEBUG(_rosnode->get_logger(), "Waiting until control delay is over");
+        RCLCPP_DEBUG(rosnode_->get_logger(), "Waiting until control delay is over");
     }
     _last_cmd.drive.acceleration = msg->drive.acceleration;
     _last_cmd.drive.speed = msg->drive.speed;
@@ -313,7 +307,7 @@ void RaceCarPlugin::onCmd(const ackermann_msgs::msg::AckermannDriveStamped::Shar
     _last_cmd_time = _world->SimTime();
 }
 
-GZ_REGISTER_MODEL_PLUGIN(RaceCarPlugin)
+GZ_REGISTER_MODEL_PLUGIN(VehiclePlugin)
 
-}  // namespace eufs_plugins
+}  // namespace vehicle_plugins
 }  // namespace gazebo_plugins

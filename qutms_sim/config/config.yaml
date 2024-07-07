@@ -1,0 +1,23 @@
+/**:
+  ros__parameters:
+    track: "small_track"
+    rviz: true
+    use_sim_time: true
+
+gazebo:
+  ros__parameters:
+    # default is 10.0. we needed higher freq so the gazebo clock would update faster.
+    # this was responsible for calculating time deltas in other node processes.
+    publish_rate: 100.0
+
+vehicle:
+  ros__parameters:
+    map_frame: "track"
+    odom_frame: "odom"
+    base_frame: "base_footprint"
+    update_rate: 1000.0
+    publish_rate: 50.0
+    control_delay: 0.035
+    steering_lock_time: 1.5
+    vehicle_config: "null"
+    noise_config: "null"
