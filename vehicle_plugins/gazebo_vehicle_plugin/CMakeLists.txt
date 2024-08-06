@@ -16,11 +16,13 @@ ament_target_dependencies(gazebo_vehicle
   "std_msgs"
   "sensor_msgs"
   "eufs_models"
+  "yaml-cpp"
+  "geometry_msgs"
 )
 
 target_include_directories(gazebo_vehicle PUBLIC include)
 target_include_directories(gazebo_vehicle PUBLIC ${PROJECT_SOURCE_DIR}/include)
-target_link_libraries(gazebo_vehicle eufs_models::eufs_models)
+target_link_libraries(gazebo_vehicle)
 ament_export_libraries(gazebo_vehicle)
 
 install(TARGETS gazebo_vehicle

@@ -27,6 +27,7 @@ find_package(eufs_models REQUIRED)
 find_package(ackermann_msgs REQUIRED)
 find_package(ament_index_cpp REQUIRED)
 find_package(yaml_cpp_vendor REQUIRED)
+find_package(yaml-cpp REQUIRED)
 
 link_directories(${gazebo_dev_LIBRARY_DIRS})
 
@@ -64,5 +65,6 @@ ament_export_dependencies(eufs_models)
 ament_export_dependencies(ackermann_msgs)
 ament_export_dependencies(ament_index_cpp)
 ament_export_dependencies(yaml_cpp_vendor)
+ament_export_dependencies(yaml-cpp)
 
 ament_package()

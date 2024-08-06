@@ -5,186 +5,199 @@ namespace vehicle_plugins {
 
 VehiclePlugin::VehiclePlugin() {}
 
-VehiclePlugin::~VehiclePlugin() { _update_connection.reset(); }
+VehiclePlugin::~VehiclePlugin() { update_connection.reset(); }
 
-void VehiclePlugin::Load(gazebo::physics::ModelPtr model, sdf::ElementPtr sdf) {
-    rosnode_ = gazebo_ros::Node::Get(sdf);
+void VehiclePlugin::Load(gazebo::physics::ModelPtr gz_model, sdf::ElementPtr sdf) {
+    node = gazebo_ros::Node::Get(sdf);
 
-    RCLCPP_DEBUG(rosnode_->get_logger(), "Loading VehiclePlugin");
+    RCLCPP_DEBUG(node->get_logger(), "Loading VehiclePlugin");
 
-    _model = model;
-    _world = _model->GetWorld();
+    model = gz_model;
+    world = model->GetWorld();
 
-    _tf_br = std::make_unique<tf2_ros::TransformBroadcaster>(rosnode_);
+    tf_br = std::make_unique<tf2_ros::TransformBroadcaster>(node);
 
     // Initialize parameters
     initParams();
 
     // ROS Publishers
     // Odometry
-    _pub_odom = rosnode_->create_publisher<nav_msgs::msg::Odometry>("/odometry", 1);
-    _pub_gt_odom = rosnode_->create_publisher<nav_msgs::msg::Odometry>("/odometry/ground_truth", 1);
+    odometry_pub = node->create_publisher<nav_msgs::msg::Odometry>("odometry", 1);
+    gt_odometry_pub = node->create_publisher<nav_msgs::msg::Odometry>("odometry/ground_truth", 1);
 
     // RVIZ joint visuals
-    pub_joint_state_ = rosnode_->create_publisher<sensor_msgs::msg::JointState>("/joint_states/steering", 1);
+    joint_state_pub = node->create_publisher<sensor_msgs::msg::JointState>("joint_states/steering", 1);
 
     // ROS Subscriptions
-    _sub_cmd = rosnode_->create_subscription<ackermann_msgs::msg::AckermannDriveStamped>(
-        "/control/driving_command", 1, std::bind(&VehiclePlugin::onCmd, this, std::placeholders::_1));
+    ackermann_cmd_sub = node->create_subscription<ackermann_msgs::msg::AckermannDriveStamped>(
+        "control/ackermann_cmd", 1, std::bind(&VehiclePlugin::onAckermannCmd, this, std::placeholders::_1));
+    twist_cmd_sub = node->create_subscription<geometry_msgs::msg::Twist>(
+        "control/twist_cmd", 1, std::bind(&VehiclePlugin::onTwistCmd, this, std::placeholders::_1));
 
-    // ROS Services
-    _reset_vehicle_pos_srv = rosnode_->create_service<std_srvs::srv::Trigger>(
-        "/system/reset_car_pos",
+    reset_vehicle_pos_srv = node->create_service<std_srvs::srv::Trigger>(
+        "reset_vehicle",
         std::bind(&VehiclePlugin::resetVehiclePosition, this, std::placeholders::_1, std::placeholders::_2));
 
     // Connect to Gazebo
-    _update_connection = gazebo::event::Events::ConnectWorldUpdateBegin(std::bind(&VehiclePlugin::update, this));
-    _last_sim_time = _world->SimTime();
+    update_connection = gazebo::event::Events::ConnectWorldUpdateBegin(std::bind(&VehiclePlugin::update, this));
+    last_sim_time = world->SimTime();
 
-    _max_steering_rate = (vehicle_model_->getParam().input_ranges.delta.max - vehicle_model_->getParam().input_ranges.delta.min) /
-                         _steering_lock_time;
+    max_steering_rate = (vehicle_model->getParam().input_ranges.delta.max - vehicle_model->getParam().input_ranges.delta.min) /
+                         steering_lock_time;
 
     // Set offset
     setPositionFromWorld();
 
-    RCLCPP_INFO(rosnode_->get_logger(), "Gazebo VehiclePlugin Loaded");
+    RCLCPP_INFO(node->get_logger(), "Gazebo VehiclePlugin Loaded");
 }
 
 void VehiclePlugin::initParams() {
     // Get ROS parameters
-    _update_rate = rosnode_->declare_parameter("update_rate", 2.0);
-    _publish_rate = rosnode_->declare_parameter("publish_rate", 50.0);
-    _map_frame = rosnode_->declare_parameter("map_frame", "map");
-    _odom_frame = rosnode_->declare_parameter("odom_frame", "odom");
-    _base_frame = rosnode_->declare_parameter("base_frame", "base_link");
-    _control_delay = rosnode_->declare_parameter("control_delay", 0.5);
-    /// SHOULD BE IN VEHICLE PARAMS FILE
-    _steering_lock_time = rosnode_->declare_parameter("steering_lock_time", 1.0);
+    update_rate = node->declare_parameter("update_rate", 2.0);
+    publish_rate = node->declare_parameter("publish_rate", 50.0);
+    map_frame = node->declare_parameter("map_frame", "map");
+    odom_frame = node->declare_parameter("odom_frame", "odom");
+    base_frame = node->declare_parameter("base_frame", "base_link");
+    control_delay = node->declare_parameter("control_delay", 0.5);
+    steering_lock_time = node->declare_parameter("steering_lock_time", 1.0);
 
     // Vehicle model
-    std::string vehicle_yaml_name = rosnode_->declare_parameter("vehicle_params", "null");
+    std::string vehicle_yaml_name = node->declare_parameter("vehicle_params", "null");
     if (vehicle_yaml_name == "null") {
-        RCLCPP_FATAL(rosnode_->get_logger(), "gazebo_vehicle plugin missing <vehicle_config> in <config.yaml>, cannot proceed");
+        RCLCPP_FATAL(node->get_logger(), "gazebo_vehicle plugin missing <vehicle_config> in <config.yaml>, cannot proceed");
         exit(1);
     }
-    vehicle_model_ = std::unique_ptr<eufs::models::VehicleModel>(new eufs::models::DynamicBicycle(vehicle_yaml_name));
-
+    vehicle_model = std::make_unique<VehicleModelBike>(vehicle_yaml_name);
+    motion_noise = std::make_unique<Noise>(vehicle_yaml_name);
 
     // Steering joints
-    std::string leftSteeringJointName = _model->GetName() + "::left_steering_hinge_joint";
-    _left_steering_joint = _model->GetJoint(leftSteeringJointName);
-    std::string rightSteeringJointName = _model->GetName() + "::right_steering_hinge_joint";
-    _right_steering_joint = _model->GetJoint(rightSteeringJointName);
+    std::string left_steering_joint_name = model->GetName() + "::left_steering_hinge_joint";
+    left_steering_joint = model->GetJoint(left_steering_joint_name);
+    std::string right_steering_joint_name = model->GetName() + "::right_steering_hinge_joint";
+    right_steering_joint = model->GetJoint(right_steering_joint_name);
 }
 
 void VehiclePlugin::setPositionFromWorld() {
-    _offset = _model->WorldPose();
+    offset = model->WorldPose();
 
-    RCLCPP_DEBUG(rosnode_->get_logger(), "Got starting offset %f %f %f", _offset.Pos()[0], _offset.Pos()[1],
-                 _offset.Pos()[2]);
+    RCLCPP_DEBUG(node->get_logger(), "Got starting offset %f %f %f", offset.Pos().X(), offset.Pos().Y(),
+                 offset.Pos().Z());
 
-    state_.x = 0.0;
-    state_.y = 0.0;
-    state_.z = 0.0;
-    state_.yaw = 0.0;
-    state_.v_x = 0.0;
-    state_.v_y = 0.0;
-    state_.v_z = 0.0;
-    state_.r_x = 0.0;
-    state_.r_y = 0.0;
-    state_.r_z = 0.0;
-    state_.a_x = 0.0;
-    state_.a_y = 0.0;
-    state_.a_z = 0.0;
+    state_odom.header.stamp.sec = last_sim_time.sec;
+    state_odom.header.stamp.nanosec = last_sim_time.nsec;
+    state_odom.header.frame_id = odom_frame;
+    state_odom.child_frame_id = base_frame;
+    state_odom.pose.pose.position.x = offset.Pos().X();
+    state_odom.pose.pose.position.y = offset.Pos().Y();
+    state_odom.pose.pose.position.z = offset.Pos().Z();
 
-    _last_cmd.drive.steering_angle = 0;
-    _last_cmd.drive.acceleration = -100;
-    _last_cmd.drive.speed = 0;
+    state_odom.pose.pose.orientation.x = offset.Rot().X();
+    state_odom.pose.pose.orientation.y = offset.Rot().Y();
+    state_odom.pose.pose.orientation.z = offset.Rot().Z();
+    state_odom.pose.pose.orientation.w = offset.Rot().W();
+
+    state_odom.twist.twist.linear.x = 0.0;
+    state_odom.twist.twist.linear.y = 0.0;
+    state_odom.twist.twist.linear.z = 0.0;
+
+    state_odom.twist.twist.angular.x = 0.0;
+    state_odom.twist.twist.angular.y = 0.0;
+    state_odom.twist.twist.angular.z = 0.0;
+
+    last_cmd.drive.steering_angle = 0;
+    last_cmd.drive.acceleration = -100;
+    last_cmd.drive.speed = 0;
+
+    state = odomToState(state_odom);
 }
 
 bool VehiclePlugin::resetVehiclePosition(std::shared_ptr<std_srvs::srv::Trigger::Request>,
                                          std::shared_ptr<std_srvs::srv::Trigger::Response> response) {
-    state_.x = 0.0;
-    state_.y = 0.0;
-    state_.z = 0.0;
-    state_.yaw = 0.0;
-    state_.v_x = 0.0;
-    state_.v_y = 0.0;
-    state_.v_z = 0.0;
-    state_.r_x = 0.0;
-    state_.r_y = 0.0;
-    state_.r_z = 0.0;
-    state_.a_x = 0.0;
-    state_.a_y = 0.0;
-    state_.a_z = 0.0;
+
+    state_odom.header.stamp.sec = last_sim_time.sec;
+    state_odom.header.stamp.nanosec = last_sim_time.nsec;
+    state_odom.header.frame_id = odom_frame;
+    state_odom.child_frame_id = base_frame;
+    state_odom.pose.pose.position.x = offset.Pos().X();
+    state_odom.pose.pose.position.y = offset.Pos().Y();
+    state_odom.pose.pose.position.z = offset.Pos().Z();
+
+    state_odom.pose.pose.orientation.x = offset.Rot().X();
+    state_odom.pose.pose.orientation.y = offset.Rot().Y();
+    state_odom.pose.pose.orientation.z = offset.Rot().Z();
+    state_odom.pose.pose.orientation.w = offset.Rot().W();
+
+    state_odom.twist.twist.linear.x = 0.0;
+    state_odom.twist.twist.linear.y = 0.0;
+    state_odom.twist.twist.linear.z = 0.0;
+
+    state_odom.twist.twist.angular.x = 0.0;
+    state_odom.twist.twist.angular.y = 0.0;
+    state_odom.twist.twist.angular.z = 0.0;
+
+    last_cmd.drive.steering_angle = 0;
+    last_cmd.drive.speed = -1;
 
     const ignition::math::Vector3d vel(0.0, 0.0, 0.0);
     const ignition::math::Vector3d angular(0.0, 0.0, 0.0);
 
-    _model->SetWorldPose(_offset);
-    _model->SetAngularVel(angular);
-    _model->SetLinearVel(vel);
+    model->SetWorldPose(offset);
+    model->SetAngularVel(angular);
+    model->SetLinearVel(vel);
+
+    state = odomToState(state_odom);
 
     return response->success;
 }
 
+// void VehiclePlugin::setModelState() {
+//     double x = offset.Pos().X() + state_odom.pose.pose.position.x * cos(offset.Rot().Yaw()) - state_odom.pose.pose.position.y * sin(offset.Rot().Yaw());
+//     double y = offset.Pos().Y() + state_odom.pose.pose.position.x * sin(offset.Rot().Yaw()) + state_odom.pose.pose.position.y * cos(offset.Rot().Yaw());
+//     double z = state_odom.pose.pose.position.z;
+
+//     double yaw = to_euler(state_odom.pose.pose.orientation)[2] + offset.Rot().Yaw();
+
+//     double vx = state_odom.twist.twist.linear.x * cos(yaw) - state_odom.twist.twist.linear.y * sin(yaw);
+//     double vy = state_odom.twist.twist.linear.x * sin(yaw) + state_odom.twist.twist.linear.y * cos(yaw);
+
+//     const ignition::math::Pose3d pose(x, y, z, 0.0, 0.0, yaw);
+//     const ignition::math::Vector3d vel(vx, vy, 0.0);
+//     const ignition::math::Vector3d angular(0.0, 0.0, state_odom.twist.twist.angular.z);
+
+//     model->SetWorldPose(pose);
+//     model->SetAngularVel(angular);
+//     model->SetLinearVel(vel);
+// }
+
 void VehiclePlugin::setModelState() {
-    double yaw = state_.yaw + _offset.Rot().Yaw();
+    double yaw = state.yaw + offset.Rot().Yaw();
 
-    double x = _offset.Pos().X() + state_.x * cos(_offset.Rot().Yaw()) - state_.y * sin(_offset.Rot().Yaw());
-    double y = _offset.Pos().Y() + state_.x * sin(_offset.Rot().Yaw()) + state_.y * cos(_offset.Rot().Yaw());
-    double z = state_.z;
+    double x = offset.Pos().X() + state.x * cos(offset.Rot().Yaw()) - state.y * sin(offset.Rot().Yaw());
+    double y = offset.Pos().Y() + state.x * sin(offset.Rot().Yaw()) + state.y * cos(offset.Rot().Yaw());
+    double z = state.z;
 
-    double vx = state_.v_x * cos(yaw) - state_.v_y * sin(yaw);
-    double vy = state_.v_x * sin(yaw) + state_.v_y * cos(yaw);
+    double vx = state.v_x * cos(yaw) - state.v_y * sin(yaw);
+    double vy = state.v_x * sin(yaw) + state.v_y * cos(yaw);
 
     const ignition::math::Pose3d pose(x, y, z, 0, 0.0, yaw);
     const ignition::math::Vector3d vel(vx, vy, 0.0);
-    const ignition::math::Vector3d angular(0.0, 0.0, state_.r_z);
+    const ignition::math::Vector3d angular(0.0, 0.0, state.r_z);
 
-    _model->SetWorldPose(pose);
-    _model->SetAngularVel(angular);
-    _model->SetLinearVel(vel);
+    model->SetWorldPose(pose);
+    model->SetAngularVel(angular);
+    model->SetLinearVel(vel);
 }
 
-nav_msgs::msg::Odometry VehiclePlugin::stateToOdom(const eufs::models::State &state) {
-    // convert all state field into respective odometry fields
-    nav_msgs::msg::Odometry msg;
-    msg.header.stamp.sec = _last_sim_time.sec;
-    msg.header.stamp.nanosec = _last_sim_time.nsec;
-    msg.header.frame_id = _odom_frame;
-    msg.child_frame_id = _base_frame;
-
-    msg.pose.pose.position.x = state.x;
-    msg.pose.pose.position.y = state.y;
-
-    std::vector<double> orientation = {state.yaw, 0.0, 0.0};
-    orientation = to_quaternion(orientation);
-
-    msg.pose.pose.orientation.x = orientation[0];
-    msg.pose.pose.orientation.y = orientation[1];
-    msg.pose.pose.orientation.z = orientation[2];
-    msg.pose.pose.orientation.w = orientation[3];
-
-    msg.twist.twist.linear.x = state.v_x;
-    msg.twist.twist.linear.y = state.v_y;
-
-    msg.twist.twist.angular.z = state.yaw;
-
-    return msg;
-}
-
-void VehiclePlugin::publishVehicleMotion() {
+void VehiclePlugin::publishVehicleOdom() {
     // Get odometry msg from state
-    nav_msgs::msg::Odometry odom = stateToOdom(state_);
-    if (has_subscribers(_pub_gt_odom)) {
-        _pub_gt_odom->publish(odom);
+    if (has_subscribers(gt_odometry_pub)) {
+        gt_odometry_pub->publish(state_odom);
     }
 
     // Apply noise to state and publish
-    nav_msgs::msg::Odometry odom_noisy = stateToOdom(_noise->applyNoise(state_));
-    if (has_subscribers(_pub_odom)) {
-        _pub_odom->publish(odom_noisy);
+    nav_msgs::msg::Odometry odom_noisy = motion_noise->applyNoise(state_odom);
+    if (has_subscribers(odometry_pub)) {
+        odometry_pub->publish(odom_noisy);
     }
 }
 
@@ -192,24 +205,24 @@ void VehiclePlugin::publishTf() {
     // Base->Odom
     // Position
     tf2::Transform base_to_odom;
-    eufs::models::State noise_tf_state = _noise->applyNoise(state_);
-    base_to_odom.setOrigin(tf2::Vector3(noise_tf_state.x, noise_tf_state.y, 0.0));
+    nav_msgs::msg::Odometry odom_noisy = motion_noise->applyNoise(state_odom);
+    base_to_odom.setOrigin(tf2::Vector3(odom_noisy.pose.pose.position.x, odom_noisy.pose.pose.position.y, 0.0));
 
     // Orientation
     tf2::Quaternion base_odom_q;
-    base_odom_q.setRPY(0.0, 0.0, noise_tf_state.yaw);
+    tf2::convert(odom_noisy.pose.pose.orientation, base_odom_q);
     base_to_odom.setRotation(base_odom_q);
 
     // Send TF
     geometry_msgs::msg::TransformStamped transform_stamped;
 
-    transform_stamped.header.stamp.sec = _last_sim_time.sec;
-    transform_stamped.header.stamp.nanosec = _last_sim_time.nsec;
-    transform_stamped.header.frame_id = _odom_frame;
-    transform_stamped.child_frame_id = _base_frame;
+    transform_stamped.header.stamp.sec = last_sim_time.sec;
+    transform_stamped.header.stamp.nanosec = last_sim_time.nsec;
+    transform_stamped.header.frame_id = odom_frame;
+    transform_stamped.child_frame_id = base_frame;
     tf2::convert(base_to_odom, transform_stamped.transform);
 
-    _tf_br->sendTransform(transform_stamped);
+    tf_br->sendTransform(transform_stamped);
 
     // Odom->Map
     // Position
@@ -222,43 +235,81 @@ void VehiclePlugin::publishTf() {
     odom_to_map.setRotation(odom_map_q);
 
     // Send TF
-    transform_stamped.header.stamp.sec = _last_sim_time.sec;
-    transform_stamped.header.stamp.nanosec = _last_sim_time.nsec;
-    transform_stamped.header.frame_id = _map_frame;
-    transform_stamped.child_frame_id = _odom_frame;
+    transform_stamped.header.stamp.sec = last_sim_time.sec;
+    transform_stamped.header.stamp.nanosec = last_sim_time.nsec;
+    transform_stamped.header.frame_id = map_frame;
+    transform_stamped.child_frame_id = odom_frame;
     tf2::convert(odom_to_map, transform_stamped.transform);
 
-    _tf_br->sendTransform(transform_stamped);
+    tf_br->sendTransform(transform_stamped);
+}
+
+nav_msgs::msg::Odometry VehiclePlugin::stateToOdom(const State &state) {
+    // convert all state field into respective odometry fields
+    nav_msgs::msg::Odometry msg;
+    msg.header.stamp.sec = last_sim_time.sec;
+    msg.header.stamp.nanosec = last_sim_time.nsec;
+    msg.header.frame_id = odom_frame;
+    msg.child_frame_id = base_frame;
+
+    msg.pose.pose.position.x = state.x;
+    msg.pose.pose.position.y = state.y;
+
+    std::vector<double> orientation = {0.0, 0.0, state.yaw};
+    msg.pose.pose.orientation = to_quaternion(orientation);
+
+    msg.twist.twist.linear.x = state.v_x;
+    msg.twist.twist.linear.y = state.v_y;
+
+    msg.twist.twist.angular.z = state.yaw;
+
+    return msg;
+}
+
+State VehiclePlugin::odomToState(const nav_msgs::msg::Odometry &odom) {
+    State state;
+    state.x = odom.pose.pose.position.x;
+    state.y = odom.pose.pose.position.y;
+    geometry_msgs::msg::Quaternion q = odom.pose.pose.orientation;
+    state.yaw = to_euler(q)[2];
+    state.v_x = odom.twist.twist.linear.x;
+    state.v_y = odom.twist.twist.linear.y;
+    state.r_z = odom.twist.twist.angular.z;
+
+    return state;
 }
 
 void VehiclePlugin::update() {
     // Check against update rate
-    gazebo::common::Time curTime = _world->SimTime();
-    double dt = calc_dt(_last_sim_time, curTime);
-    if (dt < (1 / _update_rate)) {
+    gazebo::common::Time curTime = world->SimTime();
+    double dt = calc_dt(last_sim_time, curTime);
+    if (dt < (1 / update_rate)) {
         return;
     }
 
-    _last_sim_time = curTime;
+    last_sim_time = curTime;
 
-    des_input_.acc = _last_cmd.drive.acceleration;
-    des_input_.vel = _last_cmd.drive.speed;
-    des_input_.delta = _last_cmd.drive.steering_angle * 3.1415 / 180;
+    input.acceleration = last_cmd.drive.acceleration;
+    input.velocity = last_cmd.drive.speed;
+    input.steering = last_cmd.drive.steering_angle * 3.1415 / 180; // Convert to radians
     // 90* (max steering angle) = 16* (max wheel angle)
-    des_input_.delta *= (16.0 / 90.0);  // maybe use params not hardcoded?
+    input.steering *= (16.0 / 90.0);  // maybe use params not hardcoded?
 
-    double current_speed = std::sqrt(std::pow(state_.v_x, 2) + std::pow(state_.v_y, 2));
-    act_input_.acc = (des_input_.vel - current_speed) / dt;
+    double current_speed = std::sqrt(std::pow(state_odom.twist.twist.linear.x, 2) + std::pow(state_odom.twist.twist.linear.y, 2));
+    output.acceleration = (input.velocity - current_speed) / dt;
+
+    // RCLCPP_INFO(node->get_logger(), "Steering Angle: %f current: %f", (input.steering, output.steering));
 
     // Make sure steering rate is within limits
-    act_input_.delta += (des_input_.delta - act_input_.delta >= 0 ? 1 : -1) *
-                        std::min(_max_steering_rate * dt, std::abs(des_input_.delta - act_input_.delta));
+    output.steering += (input.steering - output.steering >= 0 ? 1 : -1) *
+                        std::min(max_steering_rate * dt, std::abs(input.steering - output.steering));
+
 
     // Ensure vehicle can drive
-    if ((_world->SimTime() - _last_cmd_time).Double() > 0.5) {
-        act_input_.acc = -100.0;
-        act_input_.vel = 0.0;
-        act_input_.delta = 0.0;
+    if (input.velocity < 0) {
+        output.acceleration = -100.0;
+        output.velocity = 0.0;
+        output.steering = 0.0;
     }
 
     // Update z value from simulation
@@ -266,45 +317,68 @@ void VehiclePlugin::update() {
     // the vehicle in simulation has problems interacting with the ground plane.
     // This may cause problems if the vehicle models start to take into account z
     // but because this simulation isn't for flying cars we should be ok (at least for now).
-    state_.z = _model->WorldPose().Pos().Z();
+    state.z = model->WorldPose().Pos().Z();
 
-    vehicle_model_->updateState(state_, act_input_, dt);
+    // odom to state
+    vehicle_model->updateState(state, output, dt);
 
-    _left_steering_joint->SetPosition(0, act_input_.delta);
-    _right_steering_joint->SetPosition(0, act_input_.delta);
-    // joint states
+    left_steering_joint->SetPosition(0, output.steering);
+    right_steering_joint->SetPosition(0, output.steering);
+
+    // joint state visuals
     sensor_msgs::msg::JointState joint_state;
-    joint_state.header.stamp.sec = _last_sim_time.sec;
-    joint_state.header.stamp.nanosec = _last_sim_time.nsec;
-    joint_state.name.push_back(_left_steering_joint->GetName());
-    joint_state.name.push_back(_right_steering_joint->GetName());
-    joint_state.position.push_back(_left_steering_joint->Position());
-    joint_state.position.push_back(_right_steering_joint->Position());
+    joint_state.header.stamp.sec = last_sim_time.sec;
+    joint_state.header.stamp.nanosec = last_sim_time.nsec;
+    joint_state.name.push_back(left_steering_joint->GetName());
+    joint_state.name.push_back(right_steering_joint->GetName());
+    joint_state.position.push_back(left_steering_joint->Position());
+    joint_state.position.push_back(right_steering_joint->Position());
 
-    pub_joint_state_->publish(joint_state);
+    joint_state_pub->publish(joint_state);
 
     setModelState();
 
-    double time_since_last_published = (_last_sim_time - _time_last_published).Double();
-    if (time_since_last_published < (1 / _publish_rate)) {
+    double time_since_last_published = (last_sim_time - last_published_time).Double();
+    if (time_since_last_published < (1 / publish_rate)) {
         return;
     }
-    _time_last_published = _last_sim_time;
+    last_published_time = last_sim_time;
+
+    state_odom = stateToOdom(state);
 
     // Publish car states
-    publishVehicleMotion();
+    publishVehicleOdom();
     publishTf();
 }
 
-void VehiclePlugin::onCmd(const ackermann_msgs::msg::AckermannDriveStamped::SharedPtr msg) {
-    RCLCPP_DEBUG(rosnode_->get_logger(), "Last time: %f", (_world->SimTime() - _last_cmd_time).Double());
-    while ((_world->SimTime() - _last_cmd_time).Double() < _control_delay) {
-        RCLCPP_DEBUG(rosnode_->get_logger(), "Waiting until control delay is over");
+void VehiclePlugin::onAckermannCmd(const ackermann_msgs::msg::AckermannDriveStamped::SharedPtr msg) {
+    RCLCPP_DEBUG(node->get_logger(), "Last time: %f", (world->SimTime() - last_cmd_time).Double());
+    while ((world->SimTime() - last_cmd_time).Double() < control_delay) {
+        RCLCPP_DEBUG(node->get_logger(), "Waiting until control delay is over");
     }
-    _last_cmd.drive.acceleration = msg->drive.acceleration;
-    _last_cmd.drive.speed = msg->drive.speed;
-    _last_cmd.drive.steering_angle = msg->drive.steering_angle;
-    _last_cmd_time = _world->SimTime();
+    last_cmd.drive.acceleration = msg->drive.acceleration;
+    last_cmd.drive.speed = msg->drive.speed;
+    last_cmd.drive.steering_angle = msg->drive.steering_angle;
+    last_cmd_time = world->SimTime();
+}
+
+void VehiclePlugin::onTwistCmd(const geometry_msgs::msg::Twist::SharedPtr msg) {
+    RCLCPP_DEBUG(node->get_logger(), "Last time: %f", (world->SimTime() - last_cmd_time).Double());
+    while ((world->SimTime() - last_cmd_time).Double() < control_delay) {
+        RCLCPP_DEBUG(node->get_logger(), "Waiting until control delay is over");
+    }
+    if (msg->linear.x > 0) {
+        last_cmd.drive.speed = msg->linear.x;
+    } else if (msg->linear.x < 0) {
+        last_cmd.drive.speed = -1;
+        last_cmd.drive.steering_angle = 0;
+    }
+    last_cmd.drive.steering_angle += msg->angular.z;
+
+    // last_cmd.drive.steering_angle = angular_vel_to_steering_angle(last_cmd.drive.speed, msg->angular.z, vehicle_model->getParam().kinematic.l);
+    RCLCPP_INFO(node->get_logger(), "Steering Angle: %f", (last_cmd.drive.steering_angle));
+
+    last_cmd_time = world->SimTime();
 }
 
 GZ_REGISTER_MODEL_PLUGIN(VehiclePlugin)

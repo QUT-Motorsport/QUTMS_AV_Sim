@@ -17,6 +17,8 @@
 // ROS msgs
 #include "ackermann_msgs/msg/ackermann_drive_stamped.hpp"
 #include "geometry_msgs/msg/vector3.hpp"
+#include "geometry_msgs/msg/quaternion.hpp"
+#include "geometry_msgs/msg/twist.hpp"
 #include "nav_msgs/msg/odometry.hpp"
 #include "sensor_msgs/msg/joint_state.hpp"
 
@@ -38,7 +40,10 @@
 #include <gazebo_ros/node.hpp>
 
 // Local includes
-#include "eufs_models/eufs_models.hpp"
+#include "gazebo_vehicle_plugin/noise.hpp"
+#include "gazebo_vehicle_plugin/utils.hpp"
+#include "gazebo_vehicle_plugin/vehicle_model_bike.hpp"
+#include "gazebo_vehicle_plugin/vehicle_state.hpp"
 
 namespace gazebo_plugins {
 namespace vehicle_plugins {
@@ -49,7 +54,7 @@ class VehiclePlugin : public gazebo::ModelPlugin {
 
     ~VehiclePlugin() override;
 
-    void Load(gazebo::physics::ModelPtr model, sdf::ElementPtr sdf) override;
+    void Load(gazebo::physics::ModelPtr gz_model, sdf::ElementPtr sdf) override;
 
    private:
     void initParams();
@@ -57,112 +62,63 @@ class VehiclePlugin : public gazebo::ModelPlugin {
     bool resetVehiclePosition(std::shared_ptr<std_srvs::srv::Trigger::Request> request,
                               std::shared_ptr<std_srvs::srv::Trigger::Response> response);
     void setModelState();
-    void publishVehicleMotion();
+    void publishVehicleOdom();
     void publishTf();
     void update();
-    void onCmd(const ackermann_msgs::msg::AckermannDriveStamped::SharedPtr msg);
+    void onAckermannCmd(const ackermann_msgs::msg::AckermannDriveStamped::SharedPtr msg);
+    void onTwistCmd(const geometry_msgs::msg::Twist::SharedPtr msg);
 
-    nav_msgs::msg::Odometry stateToOdom(const eufs::models::State &state);
+    nav_msgs::msg::Odometry stateToOdom(const State &state);
+    State odomToState(const nav_msgs::msg::Odometry &odom);
 
-    std::shared_ptr<rclcpp::Node> rosnode_;
-    eufs::models::VehicleModelPtr vehicle_model_;
+    std::shared_ptr<rclcpp::Node> node;
 
-    // States
-    eufs::models::State state_;
-    eufs::models::Input des_input_, act_input_;
-    std::unique_ptr<eufs::models::Noise> _noise;
-    ignition::math::Pose3d _offset;
+    // Vehicle Motion
+    VehicleModelBikePtr vehicle_model;
+    nav_msgs::msg::Odometry state_odom;
+    Control input, output;
+    State state;
+    std::unique_ptr<Noise> motion_noise;
+    ignition::math::Pose3d offset;
 
     // Gazebo
-    gazebo::physics::WorldPtr _world;
-    gazebo::physics::ModelPtr _model;
-    gazebo::event::ConnectionPtr _update_connection;
-    gazebo::common::Time _last_sim_time, _last_cmd_time;
+    gazebo::physics::WorldPtr world;
+    gazebo::physics::ModelPtr model;
+    gazebo::event::ConnectionPtr update_connection;
+    gazebo::common::Time last_sim_time, last_cmd_time, last_published_time;
 
     // Rate to publish ros messages
-    double _update_rate;
-    double _publish_rate;
-    gazebo::common::Time _time_last_published;
+    double update_rate;
+    double publish_rate;
 
     // ROS TF
-    bool _pub_tf;
-    std::string _map_frame;
-    std::string _odom_frame;
-    std::string _base_frame;
-    std::unique_ptr<tf2_ros::TransformBroadcaster> _tf_br;
+    bool pub_tf;
+    std::string map_frame;
+    std::string odom_frame;
+    std::string base_frame;
+    std::unique_ptr<tf2_ros::TransformBroadcaster> tf_br;
 
     // ROS Publishers
-    rclcpp::Publisher<nav_msgs::msg::Odometry>::SharedPtr _pub_odom;
-    rclcpp::Publisher<nav_msgs::msg::Odometry>::SharedPtr _pub_gt_odom;
-    rclcpp::Publisher<sensor_msgs::msg::JointState>::SharedPtr pub_joint_state_;
+    rclcpp::Publisher<nav_msgs::msg::Odometry>::SharedPtr odometry_pub;
+    rclcpp::Publisher<nav_msgs::msg::Odometry>::SharedPtr gt_odometry_pub;
+    rclcpp::Publisher<sensor_msgs::msg::JointState>::SharedPtr joint_state_pub;
 
     // ROS Subscriptions
-    rclcpp::Subscription<ackermann_msgs::msg::AckermannDriveStamped>::SharedPtr _sub_cmd;
+    rclcpp::Subscription<ackermann_msgs::msg::AckermannDriveStamped>::SharedPtr ackermann_cmd_sub;
+    rclcpp::Subscription<geometry_msgs::msg::Twist>::SharedPtr twist_cmd_sub;
 
     // ROS Services
-    rclcpp::Service<std_srvs::srv::Trigger>::SharedPtr _reset_vehicle_pos_srv;
+    rclcpp::Service<std_srvs::srv::Trigger>::SharedPtr reset_vehicle_pos_srv;
 
     // Steering joints state
-    gazebo::physics::JointPtr _left_steering_joint;
-    gazebo::physics::JointPtr _right_steering_joint;
+    gazebo::physics::JointPtr left_steering_joint;
+    gazebo::physics::JointPtr right_steering_joint;
 
     // Command queue for control delays
-    ackermann_msgs::msg::AckermannDriveStamped _last_cmd;
-    double _control_delay;
+    ackermann_msgs::msg::AckermannDriveStamped last_cmd;
+    double control_delay;
     // Steering rate limit variables
-    double _max_steering_rate, _steering_lock_time;
-
-    bool is_initalised(rclcpp::PublisherBase::SharedPtr publisher) { return (bool)publisher; }
-
-    bool has_subscribers(rclcpp::PublisherBase::SharedPtr publisher) {
-        return is_initalised(publisher) && publisher->get_subscription_count() > 0;
-    }
-
-    std::vector<double> to_quaternion(std::vector<double> &euler) {
-        // Abbreviations for the various angular functions
-        double cy = cos(euler[0] * 0.5);
-        double sy = sin(euler[0] * 0.5);
-        double cp = cos(euler[1] * 0.5);
-        double sp = sin(euler[1] * 0.5);
-        double cr = cos(euler[2] * 0.5);
-        double sr = sin(euler[2] * 0.5);
-
-        std::vector<double> q;
-        q.push_back(cy * cp * sr - sy * sp * cr);  // x
-        q.push_back(sy * cp * sr + cy * sp * cr);  // y
-        q.push_back(sy * cp * cr - cy * sp * sr);  // z
-        q.push_back(cy * cp * cr + sy * sp * sr);  // w
-
-        return q;
-    }
-
-    double calc_dt(gazebo::common::Time start, gazebo::common::Time end) { return (end - start).Double(); }
-
-    gazebo::physics::ModelPtr get_model(gazebo::physics::WorldPtr world, std::string name,
-                                        std::optional<const rclcpp::Logger> logger = {}) {
-        gazebo::physics::ModelPtr model = world->ModelByName(name);
-        if (model == nullptr) {
-            if (logger) {
-                RCLCPP_FATAL(*logger, "Could not find required model <%s>. Exiting.", name.c_str());
-            }
-            exit(1);
-        }
-        return model;
-    }
-
-    gazebo::physics::LinkPtr get_link(gazebo::physics::ModelPtr model, std::string name,
-                                    std::optional<const rclcpp::Logger> logger = {}) {
-        gazebo::physics::LinkPtr link = model->GetLink(name);
-        if (link == nullptr) {
-            if (logger) {
-                RCLCPP_FATAL(*logger, "Could not find required link <%s> on model <%s>. Exiting.", name.c_str(),
-                            model->GetName().c_str());
-            }
-            exit(1);
-        }
-        return link;
-    }
-
+    double max_steering_rate, steering_lock_time;
 };
 
 }  // namespace vehicle_plugins
