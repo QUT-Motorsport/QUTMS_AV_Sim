@@ -1,8 +1,11 @@
 /**:
   ros__parameters:
     track: "small_track"
-    rviz: true
+    rviz: false
+    foxglove: true
     use_sim_time: true
+    display_car: "false"
+    namespace: "sim"
 
 gazebo:
   ros__parameters:
@@ -10,14 +13,15 @@ gazebo:
     # this was responsible for calculating time deltas in other node processes.
     publish_rate: 100.0
 
-vehicle:
-  ros__parameters:
-    map_frame: "track"
-    odom_frame: "odom"
-    base_frame: "base_footprint"
-    update_rate: 1000.0
-    publish_rate: 50.0
-    control_delay: 0.035
-    steering_lock_time: 1.5
-    vehicle_config: "null"
-    noise_config: "null"
+sim:
+  vehicle:
+    ros__parameters:
+      map_frame: "track"
+      odom_frame: "odom"
+      base_frame: "base_footprint"
+      update_rate: 50.0
+      publish_rate: 50.0
+      control_delay: 0.035
+      steering_lock_time: 1.5
+      vehicle_config: "null"
+      noise_config: "null"
