@@ -25,7 +25,7 @@
   <depend>sensor_msgs</depend>
   <depend>ackermann_msgs</depend>
 
-  <depend>eufs_models</depend>
+  <depend>driverless_msgs</depend>
 
   <depend>ament_index_cpp</depend>
 

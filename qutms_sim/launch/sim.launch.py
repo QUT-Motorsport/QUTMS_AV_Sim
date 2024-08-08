@@ -93,6 +93,7 @@ def spawn_car(context, *args, **kwargs):
             "vehicle_config": vehicle_config,
             "base_frame": base_frame,
             "display_car": display_car,
+            "namespace": namespace,
         },
     )
     out = xacro.open_output(urdf_path)
@@ -209,11 +210,11 @@ def generate_launch_description():
     foxglove = str(data["/**"]["ros__parameters"]["foxglove"])
     display_car = data["/**"]["ros__parameters"]["display_car"]
     namespace = data["/**"]["ros__parameters"]["namespace"]
+    base_frame = data["/**"]["ros__parameters"]["base_frame"]
 
     # write noise path to plugin yaml
     data[namespace]["vehicle"]["ros__parameters"]["noise_config"] = noise_config
     data[namespace]["vehicle"]["ros__parameters"]["vehicle_params"] = vehicle_config
-    base_frame = data[namespace]["vehicle"]["ros__parameters"]["base_frame"]
 
     plugin_yaml = join(sim_pkg, "config", "user_config.yaml")
     with open(plugin_yaml, "w") as f:

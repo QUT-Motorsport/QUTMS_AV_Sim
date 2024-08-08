@@ -1,7 +1,7 @@
 <?xml version="1.0"?>
 <robot name="LiDAR" xmlns:xacro="http://www.ros.org/wiki/xacro">
   <xacro:property name="M_PI" value="3.1415926535897931" />
-  <xacro:macro name="LiDAR" params="*origin parent prefix">
+  <xacro:macro name="LiDAR" params="*origin parent prefix namespace">
 
     <xacro:property name="hz" value="10"/>
     <xacro:property name="samples" value="1000"/>
@@ -69,7 +69,7 @@
 
         <plugin name="laserscan_plugin" filename="libgazebo_ros_lidar.so">
           <ros>
-            <namespace>/sim</namespace>
+            <namespace>/${prefix}</namespace>
             <remapping>~/out:=scan</remapping>
           </ros>
           <frame_name>${prefix}</frame_name>

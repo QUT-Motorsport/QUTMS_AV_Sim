@@ -10,7 +10,7 @@ VehiclePlugin::~VehiclePlugin() { update_connection.reset(); }
 void VehiclePlugin::Load(gazebo::physics::ModelPtr gz_model, sdf::ElementPtr sdf) {
     node = gazebo_ros::Node::Get(sdf);
 
-    RCLCPP_DEBUG(node->get_logger(), "Loading VehiclePlugin");
+    RCLCPP_INFO(node->get_logger(), "Loading VehiclePlugin");
 
     model = gz_model;
     world = model->GetWorld();
@@ -202,7 +202,7 @@ void VehiclePlugin::publishVehicleOdom() {
 }
 
 void VehiclePlugin::publishTf() {
-    // Base->Odom
+    // Base->Odom/Map
     // Position
     tf2::Transform base_to_odom;
     nav_msgs::msg::Odometry odom_noisy = motion_noise->applyNoise(state_odom);
@@ -218,28 +218,9 @@ void VehiclePlugin::publishTf() {
 
     transform_stamped.header.stamp.sec = last_sim_time.sec;
     transform_stamped.header.stamp.nanosec = last_sim_time.nsec;
-    transform_stamped.header.frame_id = odom_frame;
+    transform_stamped.header.frame_id = map_frame;
     transform_stamped.child_frame_id = base_frame;
     tf2::convert(base_to_odom, transform_stamped.transform);
-
-    tf_br->sendTransform(transform_stamped);
-
-    // Odom->Map
-    // Position
-    tf2::Transform odom_to_map;
-    odom_to_map.setOrigin(tf2::Vector3(0.0, 0.0, 0.0));
-
-    // Orientation
-    tf2::Quaternion odom_map_q;
-    odom_map_q.setRPY(0.0, 0.0, 0.0);
-    odom_to_map.setRotation(odom_map_q);
-
-    // Send TF
-    transform_stamped.header.stamp.sec = last_sim_time.sec;
-    transform_stamped.header.stamp.nanosec = last_sim_time.nsec;
-    transform_stamped.header.frame_id = map_frame;
-    transform_stamped.child_frame_id = odom_frame;
-    tf2::convert(odom_to_map, transform_stamped.transform);
 
     tf_br->sendTransform(transform_stamped);
 }

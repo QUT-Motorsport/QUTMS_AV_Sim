@@ -20,7 +20,6 @@
   <depend>python3-qt5-bindings</depend>
   <depend>ament_index_python</depend>
 
-  <depend>eufs_rqt</depend>
   <depend>eufs_tracks</depend>
   <depend>vehicle_plugins</depend>
 
