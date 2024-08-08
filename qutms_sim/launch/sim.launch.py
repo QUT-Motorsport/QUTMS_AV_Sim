@@ -13,7 +13,6 @@ from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
 
 sim_pkg = get_package_share_directory("qutms_sim")
-tracks_pkg = get_package_share_directory("eufs_tracks")
 
 def get_argument(context, arg):
     return LaunchConfiguration(arg).perform(context)
@@ -30,11 +29,9 @@ def gen_world(context, *args, **kwargs):
     os.environ["GAZEBO_PLUGIN_PATH"] = (
         QUTMS + "/install/vehicle_plugins:" + "/opt/ros/" + DISTRO
     )
-    os.environ["GAZEBO_MODEL_PATH"] = tracks_pkg + "/models:" + str(MODELS)
+    os.environ["GAZEBO_MODEL_PATH"] = sim_pkg + "/models:" + str(MODELS)
     os.environ["GAZEBO_RESOURCE_PATH"] = (
-        tracks_pkg
-        + "/materials:"
-        + tracks_pkg
+        sim_pkg
         + "/meshes:"
         + sim_pkg
         + "/materials:"
@@ -43,7 +40,7 @@ def gen_world(context, *args, **kwargs):
         + str(RESOURCES)
     )
 
-    world_path = join(tracks_pkg, "worlds", track)
+    world_path = join(sim_pkg, "worlds", track)
 
     gazebo_launch = join(get_package_share_directory("gazebo_ros"), "launch", "gazebo.launch.py")
     params_file = join(sim_pkg, "config", "user_config.yaml")
@@ -67,7 +64,7 @@ def spawn_car(context, *args, **kwargs):
     # get x,y,z,roll,pitch,yaw from track csv file
     track = get_argument(context, "track")
 
-    with open(join(tracks_pkg, "csv", track + ".csv"), "r") as f:
+    with open(join(sim_pkg, "worlds", track + ".csv"), "r") as f:
         # car position is last line of csv file
         for line in f:
             pass
