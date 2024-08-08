@@ -54,7 +54,7 @@ def gen_world(context, *args, **kwargs):
                 ("gui", "false"),
                 ("world", world_path),
                 ("params_file", params_file),
-                ("gdb", "true"),
+                ("gdb", "false"),
             ],
         ),
     ]

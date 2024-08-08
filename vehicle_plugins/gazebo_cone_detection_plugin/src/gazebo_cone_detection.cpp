@@ -276,5 +276,5 @@ void ConeDetectionPlugin::publishMarkerArray(driverless_msgs::msg::ConeDetection
 
 GZ_REGISTER_MODEL_PLUGIN(ConeDetectionPlugin)
 
-}  // namespace eufs_plugins
+}  // namespace vehicle_plugins
 }  // namespace gazebo_plugins
