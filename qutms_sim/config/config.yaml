@@ -1,23 +1,41 @@
-/**:
+/**: # global node and launch params
   ros__parameters:
-    track: "small_track"
-    rviz: true
-    use_sim_time: true
+    track: "small_track" # see qutms_sim/worlds/ for available tracks
+    rviz: false # set to true to launch RVIZ (About: https://docs.ros.org/en/humble/Tutorials/Intermediate/RViz/RViz-User-Guide/RViz-User-Guide.html)
+    foxglove: true # set to true to launch the Foxglove connection (About: https://foxglove.dev/)
+    use_sim_time: true # set to true to use the simulation time (counts up from 0) otherwise uses the system time
+    display_car: "false" # set to true to display QEV-3D (for RVIZ only) otherwise displays a box car
+    namespace: "sim" # all topics will be prepended with this name (eg /control -> /sim/control)
+    map_frame: "track" # world frame
+    odom_frame: "odom" # internal odometry estimate frame
+    base_frame: "base_footprint" # robot frame
 
-gazebo:
+gazebo: # gazebo simulation parameters
   ros__parameters:
     # default is 10.0. we needed higher freq so the gazebo clock would update faster.
     # this was responsible for calculating time deltas in other node processes.
     publish_rate: 100.0
 
-vehicle:
-  ros__parameters:
-    map_frame: "track"
-    odom_frame: "odom"
-    base_frame: "base_footprint"
-    update_rate: 1000.0
-    publish_rate: 50.0
-    control_delay: 0.035
-    steering_lock_time: 1.5
-    vehicle_config: "null"
-    noise_config: "null"
+# namespace for the simulation nodes must match the namespace in the global node params
+sim:
+  vehicle: # vehicle parameters
+    ros__parameters:
+      update_rate: 50.0 # rate at which the vehicle is updated
+      publish_rate: 50.0 # rate at which the vehicle position is published
+      control_delay: 0.035 # QE-3D has a steering control delay of 35ms
+      steering_lock_time: 1.5 # QEV-3D can steer -90 to 90 degrees in 1.5 seconds
+      vehicle_config: "null" # placeholder for vehicle config file
+      noise_config: "null" # placeholder for noise config file
+  cone_detection: # cone detection parameters
+    ros__parameters:
+      track_update_rate: 20.0 # rate at which the track of cones is updated
+      lidar_update_rate: 10.0 # rate at which the detected cones are updated
+      lidar_frame_id: "velodyne" # frame id for the lidar
+      lidar_min_view_distance: 1.0 # minimum distance the lidar can see
+      lidar_max_view_distance: 20.0 # maximum distance the lidar can see
+      lidar_fov: 3.141593 # 180 degrees
+      lidar_range_noise: 0.01 # 1% range noise
+      lidar_bearing_noise: 0.001 # 0.1% bearing noise
+      lidar_detects_colour: false # lidar does not detect colour
+      lidar_offset_x: 1.59 # lidar offset from the centre of the car (forward 1.59m to under the nose)
+      lidar_offset_z: 0.25 # lidar offset from the ground (up 0.25m)

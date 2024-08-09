@@ -1,0 +1,82 @@
+<?xml version="1.0"?>
+<robot name="LiDAR" xmlns:xacro="http://www.ros.org/wiki/xacro">
+  <xacro:property name="M_PI" value="3.1415926535897931" />
+  <xacro:macro name="LiDAR" params="*origin parent prefix namespace">
+
+    <xacro:property name="hz" value="10"/>
+    <xacro:property name="samples" value="1000"/>
+    <xacro:property name="min_range" value="0.2"/>
+    <xacro:property name="max_range" value="100.0"/>
+    <xacro:property name="noise" value="0.01"/>
+    <xacro:property name="min_angle" value="-1.5707963"/>
+    <xacro:property name="max_angle" value="1.5707963"/>
+
+    <joint name="${prefix}_base_mount_joint" type="fixed">
+      <xacro:insert_block name="origin" />
+      <parent link="${parent}"/>
+      <child link="${prefix}"/>
+    </joint>
+
+    <link name="${prefix}">
+      <inertial>
+        <mass value="0.925"/>
+        <origin xyz="0 0 0"/>
+        <inertia ixx="${(0.83 * (3.0*0.0516*0.0516 + 0.0717*0.0717)) / 12.0}" ixy="0" ixz="0"
+          iyy="${(0.83 * (3.0*0.0516*0.0516 + 0.0717*0.0717)) / 12.0}" iyz="0"
+          izz="${0.5 * 0.83 * (0.0516*0.0516)}"/>
+      </inertial>
+      <visual>
+        <origin xyz="0 0 0" rpy="0 0 0"/>
+        <geometry>
+          <cylinder radius="0.0516" length="0.0717"/>
+        </geometry>
+        <material name="black"/>
+      </visual>
+    </link>
+
+    <gazebo reference="${prefix}">
+      <sensor type="ray" name="${prefix}-laserscan">
+        <always_on>true</always_on>
+        <pose>0 0 0 0 0 0</pose>
+        <visualize>false</visualize>
+        <update_rate>${hz}</update_rate>
+        <ray>
+          <scan>
+            <horizontal>
+              <samples>${samples}</samples>
+              <resolution>1.0</resolution>
+              <min_angle>${min_angle}</min_angle>
+              <max_angle>${max_angle}</max_angle>
+            </horizontal>
+            <vertical>
+              <samples>1</samples>
+              <resolution>1.0</resolution>
+              <min_angle>0.0</min_angle>
+              <max_angle>0.0</max_angle>
+            </vertical>
+          </scan>
+          <range>
+            <min>${min_range}</min>
+            <max>${max_range}</max>
+            <resolution>0.001</resolution>
+          </range>
+          <noise>
+            <type>gaussian</type>
+            <mean>0.0</mean>
+            <stddev>${noise}</stddev>
+          </noise>
+        </ray>
+
+        <plugin name="laserscan_plugin" filename="libgazebo_ros_lidar.so">
+          <ros>
+            <namespace>/${prefix}</namespace>
+            <remapping>~/out:=scan</remapping>
+          </ros>
+          <frame_name>${prefix}</frame_name>
+          <radiation_type>infrared</radiation_type>
+          <output_type>sensor_msgs/LaserScan</output_type>
+        </plugin>
+      </sensor>
+    </gazebo>
+  </xacro:macro>
+</robot>

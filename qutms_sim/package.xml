@@ -11,7 +11,8 @@
 
   <depend>rclpy</depend>
   <depend>rviz2</depend>
-
+  <depend>xacro</depend>
+  <depend>gazebo_plugins</depend>
   <depend>launch</depend>
   <depend>launch_ros</depend>
 
@@ -19,10 +20,7 @@
   <depend>python3-qt5-bindings</depend>
   <depend>ament_index_python</depend>
 
-  <depend>eufs_rqt</depend>
-  <depend>eufs_tracks</depend>
   <depend>vehicle_plugins</depend>
-  <depend>sim_vehicle</depend>
 
   <export>
     <build_type>ament_cmake</build_type>
