@@ -12,7 +12,7 @@ find_package(ament_cmake REQUIRED)
 install(DIRECTORY
   launch
   config
-  rviz
+  visuals
   meshes
   urdf
   models

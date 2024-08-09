@@ -21,6 +21,7 @@
   <depend>ament_index_python</depend>
 
   <depend>vehicle_plugins</depend>
+  <depend>foxglove_bridge</depend>
 
   <export>
     <build_type>ament_cmake</build_type>

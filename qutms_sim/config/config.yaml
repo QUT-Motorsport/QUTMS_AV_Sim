@@ -7,7 +7,7 @@
     display_car: "false" # set to true to display QEV-3D (for RVIZ only) otherwise displays a box car
     namespace: "sim" # all topics will be prepended with this name (eg /control -> /sim/control)
     map_frame: "track" # world frame
-    odom_frame: "odom" # internal odometry estimate frame
+    odom_frame: "track" # internal odometry estimate frame
     base_frame: "base_footprint" # robot frame
 
 gazebo: # gazebo simulation parameters
