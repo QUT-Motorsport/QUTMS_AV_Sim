@@ -16,7 +16,7 @@
     <!--  Gazebo ROS 2 plugins  -->
     <gazebo>
         <!-- plugin name also is ROS 2 node name -->
-        <plugin name="vehicle" filename="libgazebo_vehicle.so"></plugin>
+        <plugin name="vehicle_plugin" filename="libgazebo_vehicle.so"></plugin>
         <ros>
           <!-- could make this an arg -->
           <namespace>/$(arg namespace)</namespace>
@@ -24,7 +24,7 @@
     </gazebo>
 
     <gazebo>
-        <plugin name="cone_detection" filename="libgazebo_cone_detection.so"></plugin>
+        <plugin name="cone_detection_plugin" filename="libgazebo_cone_detection.so"></plugin>
         <ros>
           <namespace>/$(arg namespace)</namespace>
         </ros>

@@ -210,8 +210,8 @@ def generate_launch_description():
     base_frame = data["/**"]["ros__parameters"]["base_frame"]
 
     # write noise path to plugin yaml
-    data[namespace]["vehicle"]["ros__parameters"]["noise_config"] = noise_config
-    data[namespace]["vehicle"]["ros__parameters"]["vehicle_params"] = vehicle_config
+    data[namespace]["vehicle_plugin"]["ros__parameters"]["noise_config"] = noise_config
+    data[namespace]["vehicle_plugin"]["ros__parameters"]["vehicle_params"] = vehicle_config
 
     plugin_yaml = join(sim_pkg, "config", "user_config.yaml")
     with open(plugin_yaml, "w") as f:
