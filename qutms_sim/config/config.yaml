@@ -2,7 +2,7 @@
   ros__parameters:
     track: "small_track" # see qutms_sim/worlds/ for available tracks
     rviz: false # set to true to launch RVIZ (About: https://docs.ros.org/en/humble/Tutorials/Intermediate/RViz/RViz-User-Guide/RViz-User-Guide.html)
-    foxglove: false # set to true to launch the Foxglove connection (About: https://foxglove.dev/)
+    foxglove: true # set to true to launch the Foxglove connection (About: https://foxglove.dev/)
     use_sim_time: true # set to true to use the simulation time (counts up from 0) otherwise uses the system time
     display_car: "false" # set to true to display QEV-3D (for RVIZ only) otherwise displays a box car
     namespace: "sim" # all topics will be prepended with this name (eg /control -> /sim/control)

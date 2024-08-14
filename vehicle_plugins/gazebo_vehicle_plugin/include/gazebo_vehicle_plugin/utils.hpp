@@ -16,19 +16,19 @@ bool has_subscribers(rclcpp::PublisherBase::SharedPtr publisher) {
 }
 
 geometry_msgs::msg::Quaternion to_quaternion(std::vector<double> &euler) {
-    // Abbreviations for the various angular functions
-    double cy = cos(euler[0] * 0.5);
-    double sy = sin(euler[0] * 0.5);
+    // r, p, y
+    double cy = cos(euler[2] * 0.5);
+    double sy = sin(euler[2] * 0.5);
     double cp = cos(euler[1] * 0.5);
     double sp = sin(euler[1] * 0.5);
-    double cr = cos(euler[2] * 0.5);
-    double sr = sin(euler[2] * 0.5);
+    double cr = cos(euler[0] * 0.5);
+    double sr = sin(euler[0] * 0.5);
 
     geometry_msgs::msg::Quaternion q;
-    q.x = cy * cp * sr - sy * sp * cr;
-    q.y = sy * cp * sr + cy * sp * cr;
-    q.z = sy * cp * cr - cy * sp * sr;
-    q.w = cy * cp * cr + sy * sp * sr;
+    q.w = cr * cp * cy + sr * sp * sy;
+    q.x = sr * cp * cy - cr * sp * sy;
+    q.y = cr * sp * cy + sr * cp * sy;
+    q.z = cr * cp * sy - sr * sp * cy;
 
     return q;
 }

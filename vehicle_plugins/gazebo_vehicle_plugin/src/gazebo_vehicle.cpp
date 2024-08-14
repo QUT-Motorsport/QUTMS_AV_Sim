@@ -205,12 +205,11 @@ void VehiclePlugin::publishTf() {
     // Base->Odom/Map
     // Position
     tf2::Transform base_to_odom;
-    nav_msgs::msg::Odometry odom_noisy = motion_noise->applyNoise(state_odom);
-    base_to_odom.setOrigin(tf2::Vector3(odom_noisy.pose.pose.position.x, odom_noisy.pose.pose.position.y, 0.0));
+    base_to_odom.setOrigin(tf2::Vector3(state_odom.pose.pose.position.x, state_odom.pose.pose.position.y, 0.0));
 
     // Orientation
     tf2::Quaternion base_odom_q;
-    tf2::convert(odom_noisy.pose.pose.orientation, base_odom_q);
+    tf2::convert(state_odom.pose.pose.orientation, base_odom_q);
     base_to_odom.setRotation(base_odom_q);
 
     // Send TF
