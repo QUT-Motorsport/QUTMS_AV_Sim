@@ -165,7 +165,7 @@ def spawn_car(context, *args, **kwargs):
 
 
 def load_visuals(context, *args, **kwargs):
-    rviz_config_file = join(sim_pkg, "rviz", "default.rviz")
+    rviz_config_file = join(sim_pkg, "visuals", "default.rviz")
 
     return [
         TimerAction(
